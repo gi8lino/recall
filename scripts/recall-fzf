@@ -1,0 +1,382 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+recall_bin="${RECALL_BIN:-recall}"
+query=""
+
+if [[ $# -gt 0 && ${1:-} != --* ]]; then
+  query="$1"
+  shift
+fi
+
+pin_limit="${RECALL_FZF_LIMIT:-0}"
+command_width="${RECALL_FZF_COMMAND_WIDTH:-70}"
+source_width="${RECALL_FZF_SOURCE_WIDTH:-7}"
+
+pin_key="${RECALL_FZF_PIN_KEY:-ctrl-p}"
+describe_key="${RECALL_FZF_DESCRIBE_KEY:-ctrl-o}"
+remove_key="${RECALL_FZF_REMOVE_KEY:-ctrl-x}"
+
+# build_header creates an aligned column header.
+build_header() {
+  printf "%-${source_width}s  %-${command_width}s  %s" \
+    "source" \
+    "command" \
+    "description"
+}
+
+# build_help creates the visible key help text.
+build_help() {
+  printf '%s' "${RECALL_FZF_KEY_HELP:-${pin_key}: pin | ${describe_key}: edit description | ${remove_key}: remove pin | enter: insert}"
+}
+
+header="${RECALL_FZF_HEADER:-$(build_header)}"
+help_line="$(build_help)"
+
+# shell_quote quotes one value for shell commands.
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+# fzf_supports_footer reports whether fzf supports --footer.
+fzf_supports_footer() {
+  command -v fzf >/dev/null 2>&1 && fzf --help 2>/dev/null | grep -q -- '--footer'
+}
+
+# recall_fzf_command runs fzf, using fzf-tmux inside tmux when available.
+recall_fzf_command() {
+  if [[ -n ${TMUX:-} ]] && command -v fzf-tmux >/dev/null 2>&1; then
+    fzf-tmux -p "${RECALL_FZF_TMUX_SIZE:-80%,70%}" "$@"
+    return
+  fi
+
+  fzf "$@"
+}
+
+# decode_base64 decodes a base64 payload.
+decode_base64() {
+  local encoded=${1:-}
+
+  if printf '%s' "$encoded" | base64 --decode 2>/dev/null; then
+    return
+  fi
+
+  if printf '%s' "$encoded" | base64 -d 2>/dev/null; then
+    return
+  fi
+
+  printf '%s' "$encoded" | base64 -D
+}
+
+# command_from_payload decodes one command payload.
+command_from_payload() {
+  decode_base64 "$1"
+}
+
+# description_from_payload decodes one description payload.
+description_from_payload() {
+  decode_base64 "${1:-}"
+}
+
+# pin_payload pins one selected command payload.
+pin_payload() {
+  local command_payload=$1
+  local command
+
+  command=$(command_from_payload "$command_payload")
+  [[ -n $command ]] || return 0
+
+  "$recall_bin" pin -- "$command" >/dev/null
+}
+
+# prompt_description_tty prompts for a description on the current terminal.
+prompt_description_tty() {
+  local command=$1
+  local current=$2
+  local description
+
+  printf '\nRecall\n\n' >/dev/tty
+  printf 'command:\n' >/dev/tty
+  printf '%s\n\n' "$command" >/dev/tty
+  printf 'Description: ' >/dev/tty
+
+  if [[ -n $current ]]; then
+    IFS= read -e -i "$current" -r description </dev/tty || return 1
+  else
+    IFS= read -e -r description </dev/tty || return 1
+  fi
+
+  printf '%s' "$description"
+}
+
+# prompt_description_tmux prompts for a description in a tmux popup.
+prompt_description_tmux() {
+  local command=$1
+  local current=$2
+  local command_file current_file result_file prompt_script popup_command
+
+  command_file="$(mktemp "${TMPDIR:-/tmp}/recall-desc-command.XXXXXX")"
+  current_file="$(mktemp "${TMPDIR:-/tmp}/recall-desc-current.XXXXXX")"
+  result_file="$(mktemp "${TMPDIR:-/tmp}/recall-desc-result.XXXXXX")"
+  prompt_script="$(mktemp "${TMPDIR:-/tmp}/recall-desc-prompt.XXXXXX")"
+
+  printf '%s' "$command" >"$command_file"
+  printf '%s' "$current" >"$current_file"
+  : >"$result_file"
+
+  cat >"$prompt_script" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+command_file=$1
+current_file=$2
+result_file=$3
+
+command_text=""
+current=""
+
+if [[ -f $command_file ]]; then
+  command_text="$(cat "$command_file")"
+fi
+
+if [[ -f $current_file ]]; then
+  current="$(cat "$current_file")"
+fi
+
+clear
+printf '\033[1mRecall\033[0m\n\n'
+printf 'command:\n'
+printf '%s\n\n' "$command_text"
+printf 'Description: '
+
+if [[ -n $current ]]; then
+  IFS= read -e -i "$current" -r description || exit 0
+else
+  IFS= read -e -r description || exit 0
+fi
+
+printf '%s' "$description" >"$result_file"
+EOF
+
+  chmod +x "$prompt_script"
+
+  popup_command="$(shell_quote "$prompt_script") $(shell_quote "$command_file") $(shell_quote "$current_file") $(shell_quote "$result_file")"
+
+  tmux display-popup \
+    -E \
+    -w "${RECALL_FZF_DESCRIPTION_POPUP_WIDTH:-75%}" \
+    -h "${RECALL_FZF_DESCRIPTION_POPUP_HEIGHT:-40%}" \
+    -x C \
+    -y C \
+    "$popup_command" >/dev/tty 2>/dev/tty || true
+
+  cat "$result_file"
+
+  rm -f "$command_file" "$current_file" "$result_file" "$prompt_script"
+}
+
+# prompt_description prompts for a description using the best available UI.
+prompt_description() {
+  local command=$1
+  local current=$2
+
+  if [[ -n ${TMUX:-} ]] && command -v tmux >/dev/null 2>&1; then
+    prompt_description_tmux "$command" "$current"
+    return
+  fi
+
+  prompt_description_tty "$command" "$current"
+}
+
+# describe_payload updates the description for a selected pin payload.
+describe_payload() {
+  local kind=$1
+  local command_payload=$2
+  local description_payload=${3:-}
+  local command current_description description
+
+  if [[ $kind != "pin" ]]; then
+    return 0
+  fi
+
+  command=$(command_from_payload "$command_payload")
+  [[ -n $command ]] || return 0
+
+  current_description=$(description_from_payload "$description_payload")
+  description=$(prompt_description "$command" "$current_description")
+  [[ -n ${description//[[:space:]]/} ]] || return 0
+
+  "$recall_bin" describe -d "$description" -- "$command" >/dev/null 2>/dev/null
+}
+
+# remove_payload removes a selected pin payload.
+remove_payload() {
+  local kind=$1
+  local command_payload=$2
+  local command
+
+  if [[ $kind != "pin" ]]; then
+    return 0
+  fi
+
+  command=$(command_from_payload "$command_payload")
+  [[ -n $command ]] || return 0
+
+  "$recall_bin" remove -- "$command" >/dev/null
+}
+
+history_file="$(mktemp "${TMPDIR:-/tmp}/recall-fzf.XXXXXX")"
+trap 'rm -f "$history_file"' EXIT
+cat >"$history_file"
+
+fzf_header_args=(--header "$header")
+fzf_footer_args=()
+
+if fzf_supports_footer; then
+  fzf_footer_args=(--footer "$help_line")
+else
+  fzf_header_args=(--header "${header}"$'\n'"${help_line}")
+fi
+
+# list_items prints picker rows.
+list_items() {
+  "$recall_bin" picker \
+    --format fzf \
+    --pin-limit "$pin_limit" \
+    <"$history_file"
+}
+
+# select_item opens fzf and returns query, key, and selected row.
+select_item() {
+  list_items |
+    recall_fzf_command \
+      --read0 \
+      --ansi \
+      --no-sort \
+      --layout reverse \
+      --border \
+      --border-label ' recall ' \
+      "${fzf_header_args[@]}" \
+      "${fzf_footer_args[@]}" \
+      --delimiter $'\t' \
+      --with-nth '6..' \
+      --prompt '> ' \
+      --query "$query" \
+      --print-query \
+      --expect "enter,${pin_key},${describe_key},${remove_key}"
+}
+
+# selected_command_from_row prints the selected command.
+selected_command_from_row() {
+  local row=$1
+  local payload_type
+  local payload
+  local command_payload
+  local kind
+  local description_payload
+  local display
+
+  IFS=$'\t' read -r payload_type payload command_payload kind description_payload display <<<"$row"
+
+  case "$payload_type" in
+  command)
+    command_from_payload "$payload"
+    ;;
+  *)
+    command_from_payload "$command_payload"
+    ;;
+  esac
+}
+
+# selected_record_from_row prints the selected payload record.
+selected_record_from_row() {
+  local row=$1
+  local payload_type
+  local payload
+  local command_payload
+  local kind
+  local description_payload
+  local display
+
+  IFS=$'\t' read -r payload_type payload command_payload kind description_payload display <<<"$row"
+
+  printf '%s\t%s\n' "$payload_type" "$payload"
+}
+
+# handle_selected_row runs the selected key action.
+handle_selected_row() {
+  local key=$1
+  local row=$2
+  local payload_type
+  local payload
+  local command_payload
+  local kind
+  local description_payload
+  local display
+
+  IFS=$'\t' read -r payload_type payload command_payload kind description_payload display <<<"$row"
+
+  case "$key" in
+  "$pin_key")
+    pin_payload "$command_payload"
+    return 1
+    ;;
+  "$describe_key")
+    describe_payload "$kind" "$command_payload" "$description_payload"
+    return 1
+    ;;
+  "$remove_key")
+    remove_payload "$kind" "$command_payload"
+    return 1
+    ;;
+  enter | "")
+    case "${RECALL_FZF_RETURN:-command}" in
+    record)
+      selected_record_from_row "$row"
+      ;;
+    *)
+      selected_command_from_row "$row"
+      ;;
+    esac
+    return 0
+    ;;
+  *)
+    return 1
+    ;;
+  esac
+}
+
+# run_picker reopens fzf after pin, edit, and remove actions.
+run_picker() {
+  local output current_query rest key row
+
+  while true; do
+    output="$(select_item)" || return 1
+    [[ -n $output ]] || return 1
+
+    current_query="${output%%$'\n'*}"
+    rest="${output#*$'\n'}"
+
+    if [[ $rest == "$output" || -z $rest ]]; then
+      return 1
+    fi
+
+    key="${rest%%$'\n'*}"
+    row="${rest#*$'\n'}"
+
+    if [[ $row == "$rest" || -z $row ]]; then
+      return 1
+    fi
+
+    query="$current_query"
+
+    if handle_selected_row "$key" "$row"; then
+      return 0
+    fi
+  done
+}
+
+run_picker
