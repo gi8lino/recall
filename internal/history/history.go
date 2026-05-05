@@ -86,9 +86,14 @@ func readSource(source Source, maxLines int) ([]command.Command, error) {
 	}
 	defer file.Close() // nolint:errcheck
 
-	lines, err := readLines(file, maxLines)
+	rawLines, err := readRawLines(file, maxLines)
 	if err != nil {
 		return nil, err
+	}
+
+	lines := parseHistoryLines(rawLines)
+	if source.Shell == "zsh" || (source.Shell == "shell" && containsZshExtendedLine(rawLines)) {
+		lines = parseZshHistoryLines(rawLines)
 	}
 
 	commands := make([]command.Command, 0, len(lines))
@@ -108,14 +113,29 @@ func readLines(file *os.File, maxLines int) ([]string, error) {
 	return scanAllLines(file)
 }
 
+// readRawLines reads raw lines from a history file without parsing shell syntax.
+func readRawLines(file *os.File, maxLines int) ([]string, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	if maxLines > 0 {
+		return readLastRawLines(file, maxLines)
+	}
+
+	return scanAllRawLines(file)
+}
+
 // scanAllLines reads and parses every line from a history file.
 func scanAllLines(file *os.File) ([]string, error) {
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	rawLines, err := readRawLines(file, 0)
+	if err != nil {
+		return nil, err
+	}
 
-	lines := make([]string, 0)
-	for scanner.Scan() {
-		text := parseLine(scanner.Text())
+	lines := make([]string, 0, len(rawLines))
+	for _, rawLine := range rawLines {
+		text := parseLine(rawLine)
 		if text == "" {
 			continue
 		}
@@ -123,11 +143,48 @@ func scanAllLines(file *os.File) ([]string, error) {
 		lines = append(lines, text)
 	}
 
-	return lines, scanner.Err()
+	return lines, nil
+}
+
+// scanAllRawLines reads every raw line from a history file.
+func scanAllRawLines(file *os.File) ([]string, error) {
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+
+	rawLines := make([]string, 0)
+	for scanner.Scan() {
+		rawLines = append(rawLines, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return rawLines, nil
 }
 
 // readLastLines reads and parses the most recent lines from a history file.
 func readLastLines(file *os.File, maxLines int) ([]string, error) {
+	rawLines, err := readLastRawLines(file, maxLines)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := make([]string, 0, len(rawLines))
+	for _, rawLine := range rawLines {
+		text := parseLine(rawLine)
+		if text == "" {
+			continue
+		}
+
+		lines = append(lines, text)
+	}
+
+	return lines, nil
+}
+
+// readLastRawLines reads the most recent raw lines from a history file.
+func readLastRawLines(file *os.File, maxLines int) ([]string, error) {
 	stat, err := file.Stat()
 	if err != nil {
 		return nil, err
@@ -170,9 +227,62 @@ func readLastLines(file *os.File, maxLines int) ([]string, error) {
 		rawLines = rawLines[len(rawLines)-maxLines:]
 	}
 
+	return rawLines, nil
+}
+
+// parseZshHistoryLines parses raw zsh extended-history lines into logical commands.
+func parseZshHistoryLines(rawLines []string) []string {
 	lines := make([]string, 0, len(rawLines))
-	for _, line := range rawLines {
-		text := parseLine(line)
+	start := firstZshExtendedLine(rawLines)
+	if start < 0 {
+		return lines
+	}
+
+	rawLines = rawLines[start:]
+
+	var current strings.Builder
+	inEntry := false
+
+	flushZshEntry := func() {
+		if !inEntry {
+			return
+		}
+
+		text := command.Normalize(current.String())
+		if text != "" {
+			lines = append(lines, text)
+		}
+
+		current.Reset()
+		inEntry = false
+	}
+
+	for _, rawLine := range rawLines {
+		line := strings.TrimRight(rawLine, "\r")
+
+		if zshCommand := parseZshExtendedLine(line); zshCommand != "" {
+			flushZshEntry()
+			current.WriteString(zshCommand)
+			inEntry = true
+			continue
+		}
+
+		if inEntry {
+			current.WriteByte('\n')
+			current.WriteString(line)
+		}
+	}
+
+	flushZshEntry()
+
+	return lines
+}
+
+// parseHistoryLines parses raw history file lines one line at a time.
+func parseHistoryLines(rawLines []string) []string {
+	lines := make([]string, 0, len(rawLines))
+	for _, rawLine := range rawLines {
+		text := parseLine(rawLine)
 		if text == "" {
 			continue
 		}
@@ -180,7 +290,29 @@ func readLastLines(file *os.File, maxLines int) ([]string, error) {
 		lines = append(lines, text)
 	}
 
-	return lines, nil
+	return lines
+}
+
+// containsZshExtendedLine reports whether raw lines include zsh extended-history markers.
+func containsZshExtendedLine(rawLines []string) bool {
+	for _, line := range rawLines {
+		if parseZshExtendedLine(line) != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// firstZshExtendedLine returns the first raw line index that starts a zsh history entry.
+func firstZshExtendedLine(rawLines []string) int {
+	for i, line := range rawLines {
+		if parseZshExtendedLine(line) != "" {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // parseLine extracts command text from bash or zsh history lines.

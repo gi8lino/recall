@@ -199,6 +199,34 @@ func TestReadSource(t *testing.T) {
 		assert.Equal(t, "echo three", commands[0].Text)
 		assert.Equal(t, "echo two", commands[1].Text)
 	})
+
+	t.Run("preserves multiline zsh commands as one entry", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		path := writeHistoryFile(t, dir, "zsh_history", ": 1700000000:0;git commit \\\n  -m 'message'\n: 1700000001:0;echo done\n")
+
+		commands, err := readSource(Source{Path: path, Shell: "zsh"}, 3)
+
+		require.NoError(t, err)
+		require.Len(t, commands, 2)
+		assert.Equal(t, "echo done", commands[0].Text)
+		assert.Equal(t, "git commit \\\n  -m 'message'", commands[1].Text)
+	})
+
+	t.Run("detects zsh extended history through shell sources", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		path := writeHistoryFile(t, dir, "history", ": 1700000000:0;git commit \\\n  -m 'message'\n: 1700000001:0;echo done\n")
+
+		commands, err := readSource(Source{Path: path, Shell: "shell"}, 3)
+
+		require.NoError(t, err)
+		require.Len(t, commands, 2)
+		assert.Equal(t, "echo done", commands[0].Text)
+		assert.Equal(t, "git commit \\\n  -m 'message'", commands[1].Text)
+	})
 }
 
 func TestReadLines(t *testing.T) {
@@ -382,6 +410,23 @@ func TestParseZshExtendedLine(t *testing.T) {
 		t.Parallel()
 
 		assert.Empty(t, parseZshExtendedLine(": 1700000000:0;"))
+	})
+}
+
+func TestParseZshHistoryLines(t *testing.T) {
+	t.Parallel()
+
+	t.Run("preserves multiline commands and skips orphaned leading fragments", func(t *testing.T) {
+		t.Parallel()
+
+		lines := parseZshHistoryLines([]string{
+			"  -m 'orphaned fragment'",
+			": 1700000000:0;git commit \\",
+			"  -m 'message'",
+			": 1700000001:0;echo done",
+		})
+
+		assert.Equal(t, []string{"git commit \\\n  -m 'message'", "echo done"}, lines)
 	})
 }
 
