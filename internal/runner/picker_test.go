@@ -252,6 +252,18 @@ func TestParsePickerHistoryRecord(t *testing.T) {
 		assert.Equal(t, "a3ViZWN0bCBnZXQgcG9kcw==", candidate.Payload)
 	})
 
+	t.Run("normalizes command record payload to encoded command text", func(t *testing.T) {
+		t.Parallel()
+
+		candidate, ok := parsePickerHistoryRecord("command\tstale-payload\tkubectl get pods")
+
+		require.True(t, ok)
+		assert.Equal(t, "history", candidate.Kind)
+		assert.Equal(t, "kubectl get pods", candidate.Text)
+		assert.Equal(t, "command", candidate.PayloadType)
+		assert.Equal(t, "a3ViZWN0bCBnZXQgcG9kcw==", candidate.Payload)
+	})
+
 	t.Run("parses plain command record", func(t *testing.T) {
 		t.Parallel()
 

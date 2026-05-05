@@ -224,7 +224,7 @@ func parsePickerHistoryRecord(record string) (pickerCandidate, bool) {
 			return pickerCandidate{}, false
 		}
 
-		if payload == "" {
+		if payloadType == "command" || payload == "" {
 			payloadType = "command"
 			payload = encodePickerPayload(text)
 		}
