@@ -88,6 +88,16 @@ func (l Logger) Infof(format string, args ...any) {
 	l.printf("info", format, args...)
 }
 
+// Error prints an error message.
+func (l Logger) Error(msg string) {
+	l.printf("error", msg, nil)
+}
+
+// Errorf prints an error message.
+func (l Logger) Errorf(format string, args ...any) {
+	l.printf("error", format, args...)
+}
+
 // Debugf prints a debug message when debug output is enabled.
 func (l Logger) Debugf(format string, args ...any) {
 	if !l.debug {

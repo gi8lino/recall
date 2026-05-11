@@ -3,7 +3,7 @@ module github.com/containeroo/recall
 go 1.26.2
 
 require (
-	github.com/alecthomas/kong v1.15.0
+	github.com/containeroo/tinyflags v0.0.75
 	github.com/stretchr/testify v1.11.1
 )
 

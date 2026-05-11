@@ -6,101 +6,58 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"strconv"
 	"strings"
 
-	"github.com/containeroo/recall/internal/command"
 	"github.com/containeroo/recall/internal/store"
 )
 
-// PickerCmd contains options for the interactive picker candidate producer.
-type PickerCmd struct {
-	// Format controls how picker candidates are printed.
-	Format string `name:"format" enum:"fzf,json" default:"fzf" help:"Picker output format."`
-
-	// PinLimit limits how many pinned commands are loaded, with zero meaning unlimited.
-	PinLimit int `name:"pin-limit" default:"0" help:"Maximum number of pinned commands to load; zero means unlimited."`
+// PickerOptions configures one picker invocation.
+type PickerOptions struct {
+	Format   string // Format controls how picker candidates are printed.
+	PinLimit int    // PinLimit limits how many pinned commands are loaded, with zero meaning unlimited.
 }
 
 // pickerCandidate is one selectable picker candidate.
 type pickerCandidate struct {
-	// Kind is the visible source type, such as pin or history.
-	Kind string
-
-	// Text is the raw command text.
-	Text string
-
-	// Description explains why the command is useful.
-	Description string
-
-	// PayloadType describes how Payload should be interpreted.
-	PayloadType string
-
-	// Payload is the selected payload returned by the picker row.
-	Payload string
+	Kind        string // Kind is the visible source type, such as pin or history.
+	Text        string // Text is the raw command text.
+	Description string // Description explains why the command is useful.
+	PayloadType string // PayloadType describes how Payload should be interpreted.
+	Payload     string // Payload is the selected payload returned by the picker row.
 }
 
 // pickerOutput is the JSON representation of one picker candidate.
 type pickerOutput struct {
-	// Kind is the candidate source type.
-	Kind string `json:"kind"`
-
-	// Text is the raw command text.
-	Text string `json:"text"`
-
-	// Description explains why the command is useful.
-	Description string `json:"description,omitempty"`
-
-	// PayloadType describes how Payload should be interpreted.
-	PayloadType string `json:"payload_type"`
-
-	// Payload is the original selection payload.
-	Payload string `json:"payload"`
-
-	// CommandPayload is the base64-encoded raw command text.
-	CommandPayload string `json:"command_payload"`
-
-	// DescriptionPayload is the base64-encoded description.
-	DescriptionPayload string `json:"description_payload,omitempty"`
-
-	// Display is the formatted picker display row.
-	Display string `json:"display"`
+	Kind               string `json:"kind"`                          // Kind is the candidate source type.
+	Text               string `json:"text"`                          // Text is the raw command text.
+	Description        string `json:"description,omitempty"`         // Description explains why the command is useful.
+	PayloadType        string `json:"payload_type"`                  // PayloadType describes how Payload should be interpreted.
+	Payload            string `json:"payload"`                       // Payload is the original selection payload.
+	CommandPayload     string `json:"command_payload"`               // CommandPayload is the base64-encoded raw command text.
+	DescriptionPayload string `json:"description_payload,omitempty"` // DescriptionPayload is the base64-encoded description.
+	Display            string `json:"display"`                       // Display is the formatted picker display row.
 }
 
 // pickerStyle contains fzf display customization.
 type pickerStyle struct {
-	// CommandWidth is the maximum visible command column width.
-	CommandWidth int
-
-	// DescriptionWidth is the maximum visible description column width.
-	DescriptionWidth int
-
-	// PinLabel is the visible label for pinned commands.
-	PinLabel string
-
-	// HistoryLabel is the visible label for history commands.
-	HistoryLabel string
-
-	// DescriptionColor is the ANSI color prefix for descriptions.
-	DescriptionColor string
-
-	// ResetColor resets ANSI formatting.
-	ResetColor string
+	CommandWidth     int    // CommandWidth is the maximum visible command column width.
+	DescriptionWidth int    // DescriptionWidth is the maximum visible description column width.
+	PinLabel         string // PinLabel is the visible label for pinned commands.
+	HistoryLabel     string // HistoryLabel is the visible label for history commands.
+	DescriptionColor string // DescriptionColor is the ANSI color prefix for descriptions.
+	ResetColor       string // ResetColor resets ANSI formatting.
 }
 
-// Run prints picker candidates in the requested machine-readable format.
-func (c *PickerCmd) Run(r Runner, cli *CLI) error {
-	cfg := cli.Config(r.home)
-
-	candidates, err := r.pickerCandidates(cfg, c.PinLimit)
+// RunPicker prints picker candidates in the requested machine-readable format.
+func RunPicker(r Runner, cfg Config, opts PickerOptions) error {
+	candidates, err := r.pickerCandidates(cfg, opts.PinLimit)
 	if err != nil {
 		r.logger.Warnf("load picker candidates: %v", err)
 	}
 
 	style := defaultPickerStyle()
 
-	switch c.Format {
+	switch opts.Format {
 	case "fzf":
 		_, _ = r.output.Writer().Write(formatPickerRows(candidates, style))
 	case "json":
@@ -111,7 +68,7 @@ func (c *PickerCmd) Run(r Runner, cli *CLI) error {
 
 		_, _ = r.output.Writer().Write(content)
 	default:
-		return fmt.Errorf("unsupported picker format %q", c.Format)
+		return fmt.Errorf("unsupported picker format %q", opts.Format)
 	}
 
 	return nil
@@ -136,14 +93,14 @@ func (r Runner) pickerCandidates(cfg Config, pinLimit int) ([]pickerCandidate, e
 
 // pickerPinCandidates returns pinned commands as picker candidates.
 func (r Runner) pickerPinCandidates(cfg Config, limit int) ([]pickerCandidate, error) {
-	st := store.New(r.storePath(cfg))
+	st := store.NewStore(r.storePath(cfg))
 
 	pins, err := st.Pins()
 	if err != nil {
 		return nil, err
 	}
 
-	if limit > 0 && len(pins) > limit {
+	if exceedsLimit(pins, limit) {
 		pins = pins[:limit]
 	}
 
@@ -218,7 +175,7 @@ func parsePickerHistoryRecord(record string) (pickerCandidate, bool) {
 	if len(fields) == 3 {
 		payloadType := strings.TrimSpace(fields[0])
 		payload := strings.TrimSpace(fields[1])
-		text := command.Normalize(fields[2])
+		text := strings.TrimSpace(fields[2])
 
 		if payloadType == "" || text == "" {
 			return pickerCandidate{}, false
@@ -237,7 +194,7 @@ func parsePickerHistoryRecord(record string) (pickerCandidate, bool) {
 		}, true
 	}
 
-	text := command.Normalize(record)
+	text := strings.TrimSpace(record)
 	if text == "" {
 		return pickerCandidate{}, false
 	}
@@ -275,12 +232,12 @@ func dedupePickerCandidates(candidates []pickerCandidate) []pickerCandidate {
 // defaultPickerStyle returns picker display settings from environment variables.
 func defaultPickerStyle() pickerStyle {
 	return pickerStyle{
-		CommandWidth:     envInt("RECALL_FZF_COMMAND_WIDTH", 70),
-		DescriptionWidth: envInt("RECALL_FZF_DESCRIPTION_WIDTH", 45),
-		PinLabel:         envString("RECALL_FZF_PIN_LABEL", "\033[38;5;208mpin\033[0m"),
-		HistoryLabel:     envString("RECALL_FZF_HISTORY_LABEL", "\033[38;5;245mhistory\033[0m"),
-		DescriptionColor: envString("RECALL_FZF_DESCRIPTION_COLOR", "\033[38;5;110m"),
-		ResetColor:       "\033[0m",
+		CommandWidth:     envInt(EnvCommandWidth, defaultCommandWidth),
+		DescriptionWidth: envInt(EnvDescriptionWidth, defaultDescriptionWidth),
+		PinLabel:         envString(EnvPinLabel, defaultPinLabel),
+		HistoryLabel:     envString(EnvHistoryLabel, defaultHistoryLabel),
+		DescriptionColor: envString(EnvDescriptionColor, defaultDescriptionColor),
+		ResetColor:       defaultResetColor,
 	}
 }
 
@@ -428,28 +385,4 @@ func colorPickerDescription(description string, style pickerStyle) string {
 // encodePickerPayload encodes raw text for fzf transport.
 func encodePickerPayload(value string) string {
 	return base64.StdEncoding.EncodeToString([]byte(value))
-}
-
-// envString returns an environment value or fallback.
-func envString(name string, fallback string) string {
-	if value := os.Getenv(name); value != "" {
-		return value
-	}
-
-	return fallback
-}
-
-// envInt returns an integer environment value or fallback.
-func envInt(name string, fallback int) int {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
-	}
-
-	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		return fallback
-	}
-
-	return parsed
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDescribeCmdRun(t *testing.T) {
+func TestRunDescribe(t *testing.T) {
 	t.Parallel()
 
 	t.Run("requires description", func(t *testing.T) {
@@ -18,9 +18,9 @@ func TestDescribeCmdRun(t *testing.T) {
 		home := t.TempDir()
 		r, _, _ := newTestRunner(t, home)
 
-		err := (&DescribeCmd{
+		err := RunDescribe(r, newTestConfig(filepath.Join(home, "data")), DescribeOptions{
 			Command: []string{"kubectl", "get", "pods"},
-		}).Run(r, newTestCLI(filepath.Join(home, "data")))
+		})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "describe requires a non-empty description")
@@ -32,9 +32,9 @@ func TestDescribeCmdRun(t *testing.T) {
 		home := t.TempDir()
 		r, _, _ := newTestRunner(t, home)
 
-		err := (&DescribeCmd{
+		err := RunDescribe(r, newTestConfig(filepath.Join(home, "data")), DescribeOptions{
 			Description: "Show running pods",
-		}).Run(r, newTestCLI(filepath.Join(home, "data")))
+		})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "describe requires command text")
@@ -46,10 +46,10 @@ func TestDescribeCmdRun(t *testing.T) {
 		home := t.TempDir()
 		r, _, _ := newTestRunner(t, home)
 
-		err := (&DescribeCmd{
+		err := RunDescribe(r, newTestConfig(filepath.Join(home, "data")), DescribeOptions{
 			Description: "Show running pods",
 			Command:     []string{"--"},
-		}).Run(r, newTestCLI(filepath.Join(home, "data")))
+		})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "describe requires non-empty command text")
@@ -62,13 +62,13 @@ func TestDescribeCmdRun(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, stdout, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Old description"))
 
-		err := (&DescribeCmd{
+		err := RunDescribe(r, newTestConfig(dataDir), DescribeOptions{
 			Description: "Show running pods",
 			Command:     []string{"--", "kubectl", "get", "pods"},
-		}).Run(r, newTestCLI(dataDir))
+		})
 
 		require.NoError(t, err)
 		assert.Equal(t, "kubectl get pods\n", stdout.String())

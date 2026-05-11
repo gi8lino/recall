@@ -8,12 +8,11 @@ import (
 
 // Index contains commands prepared for searching.
 type Index struct {
-	// Items contains deduplicated commands in priority order.
-	Items []command.Command
+	Items []command.Command // Items contains deduplicated commands in priority order.
 }
 
-// New creates a searchable command index.
-func New(items []command.Command) Index {
+// NewIndex creates a searchable command index.
+func NewIndex(items []command.Command) Index {
 	return Index{
 		Items: dedupe(items),
 	}
@@ -46,7 +45,7 @@ func dedupe(items []command.Command) []command.Command {
 	result := make([]command.Command, 0, len(items))
 
 	for _, item := range items {
-		key := strings.ToLower(command.Normalize(item.Text))
+		key := strings.ToLower(strings.TrimSpace(item.Text))
 		if key == "" {
 			continue
 		}

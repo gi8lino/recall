@@ -11,35 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSearchCmdRun(t *testing.T) {
+func TestRunSearch(t *testing.T) {
 	t.Parallel()
-
-	t.Run("rejects pins only with history only", func(t *testing.T) {
-		t.Parallel()
-
-		r, _, _ := newTestRunner(t, t.TempDir())
-
-		err := (&SearchCmd{
-			PinsOnly:    true,
-			HistoryOnly: true,
-		}).Run(r, newTestCLI(filepath.Join(t.TempDir(), "data")))
-
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "--pins-only and --history-only cannot be used together")
-	})
-
-	t.Run("rejects exclude pins without history only", func(t *testing.T) {
-		t.Parallel()
-
-		r, _, _ := newTestRunner(t, t.TempDir())
-
-		err := (&SearchCmd{
-			ExcludePins: true,
-		}).Run(r, newTestCLI(filepath.Join(t.TempDir(), "data")))
-
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "--exclude-pins can only be used with --history-only")
-	})
 
 	t.Run("prints pins only plain output", func(t *testing.T) {
 		t.Parallel()
@@ -48,13 +21,13 @@ func TestSearchCmdRun(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, stdout, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show running pods"))
 
-		err := (&SearchCmd{
+		err := RunSearch(r, newTestConfig(dataDir), SearchOptions{
 			PinsOnly: true,
 			Query:    []string{"pods"},
-		}).Run(r, newTestCLI(dataDir))
+		})
 
 		require.NoError(t, err)
 		assert.Equal(t, "kubectl get pods\n", stdout.String())
@@ -67,13 +40,13 @@ func TestSearchCmdRun(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, stdout, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show running pods"))
 
-		err := (&SearchCmd{
+		err := RunSearch(r, newTestConfig(dataDir), SearchOptions{
 			PinsOnly: true,
 			Format:   "fzf",
-		}).Run(r, newTestCLI(dataDir))
+		})
 
 		require.NoError(t, err)
 		assert.Equal(
@@ -91,13 +64,35 @@ func TestSearchCmdRun(t *testing.T) {
 		historyFile := writeRunnerFile(t, home, "history", "kubectl get pods\ndocker compose up\n")
 		r, stdout, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show running pods"))
 
-		cli := newTestCLI(dataDir)
-		cli.HistoryFiles = []string{historyFile}
+		cfg := newTestConfig(dataDir)
+		cfg.HistoryFiles = []string{historyFile}
 
-		err := (&SearchCmd{}).Run(r, cli)
+		err := RunSearch(r, cfg, SearchOptions{})
+
+		require.NoError(t, err)
+		assert.Equal(t, "kubectl get pods\ndocker compose up\n", stdout.String())
+	})
+
+	t.Run("excludes pinned history commands when requested", func(t *testing.T) {
+		t.Parallel()
+
+		home := t.TempDir()
+		dataDir := filepath.Join(home, "data")
+		historyFile := writeRunnerFile(t, home, "history", "kubectl get pods\ndocker compose up\n")
+		r, stdout, _ := newTestRunner(t, home)
+
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
+		require.NoError(t, st.AddPin("kubectl get pods", "Show running pods"))
+
+		cfg := newTestConfig(dataDir)
+		cfg.HistoryFiles = []string{historyFile}
+
+		err := RunSearch(r, cfg, SearchOptions{
+			ExcludePins: true,
+		})
 
 		require.NoError(t, err)
 		assert.Equal(t, "kubectl get pods\ndocker compose up\n", stdout.String())
@@ -114,10 +109,10 @@ func TestRunnerSearchCommands(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, _, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show running pods"))
 
-		items, err := r.searchCommands(newTestCLIConfig(dataDir), true, false, false)
+		items, err := r.searchCommands(newTestConfig(dataDir), true, false, false)
 
 		require.NoError(t, err)
 		require.Len(t, items, 1)
@@ -132,7 +127,7 @@ func TestRunnerSearchCommands(t *testing.T) {
 		historyFile := writeRunnerFile(t, home, "history", "echo one\necho two\n")
 		r, _, _ := newTestRunner(t, home)
 
-		cfg := newTestCLIConfig(filepath.Join(home, "data"))
+		cfg := newTestConfig(filepath.Join(home, "data"))
 		cfg.HistoryFiles = []string{historyFile}
 
 		items, err := r.searchCommands(cfg, false, true, false)
@@ -141,6 +136,30 @@ func TestRunnerSearchCommands(t *testing.T) {
 		require.Len(t, items, 2)
 		assert.Equal(t, "echo two", items[0].Text)
 		assert.Equal(t, "echo one", items[1].Text)
+	})
+
+	t.Run("loads default commands with exclude pins enabled", func(t *testing.T) {
+		t.Parallel()
+
+		home := t.TempDir()
+		dataDir := filepath.Join(home, "data")
+		historyFile := writeRunnerFile(t, home, "history", "kubectl get pods\ndocker compose up\n")
+		r, _, _ := newTestRunner(t, home)
+
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
+		require.NoError(t, st.AddPin("kubectl get pods", "Show pods"))
+
+		cfg := newTestConfig(dataDir)
+		cfg.HistoryFiles = []string{historyFile}
+
+		items, err := r.searchCommands(cfg, false, false, true)
+
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		assert.Equal(t, "kubectl get pods", items[0].Text)
+		assert.True(t, items[0].Pinned)
+		assert.Equal(t, "docker compose up", items[1].Text)
+		assert.False(t, items[1].Pinned)
 	})
 }
 
@@ -154,10 +173,10 @@ func TestRunnerLoadPinnedCommands(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, _, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("go test ./...", "Run tests"))
 
-		items, err := r.loadPinnedCommands(newTestCLIConfig(dataDir))
+		items, err := r.loadPinnedCommands(newTestConfig(dataDir))
 
 		require.NoError(t, err)
 		require.Len(t, items, 1)
@@ -177,7 +196,7 @@ func TestRunnerLoadHistoryCommands(t *testing.T) {
 		historyFile := writeRunnerFile(t, home, "history", "echo one\necho two\n")
 		r, _, _ := newTestRunner(t, home)
 
-		cfg := newTestCLIConfig(dataDir)
+		cfg := newTestConfig(dataDir)
 		cfg.HistoryFiles = []string{historyFile}
 
 		items, err := r.loadHistoryCommands(cfg, false)
@@ -196,10 +215,10 @@ func TestRunnerLoadHistoryCommands(t *testing.T) {
 		historyFile := writeRunnerFile(t, home, "history", "kubectl get pods\ndocker compose up\n")
 		r, _, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show pods"))
 
-		cfg := newTestCLIConfig(dataDir)
+		cfg := newTestConfig(dataDir)
 		cfg.HistoryFiles = []string{historyFile}
 
 		items, err := r.loadHistoryCommands(cfg, true)
@@ -221,13 +240,13 @@ func TestRunnerLoadCommands(t *testing.T) {
 		historyFile := writeRunnerFile(t, home, "history", "kubectl get pods\ndocker compose up\n")
 		r, _, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show pods"))
 
-		cfg := newTestCLIConfig(dataDir)
+		cfg := newTestConfig(dataDir)
 		cfg.HistoryFiles = []string{historyFile}
 
-		items, err := r.loadCommands(cfg)
+		items, err := r.loadCommands(cfg, true)
 
 		require.NoError(t, err)
 		require.Len(t, items, 2)
@@ -245,12 +264,12 @@ func TestExcludePinnedCommands(t *testing.T) {
 		t.Parallel()
 
 		historyCommands := []command.Command{
-			command.New("kubectl get pods", "history", false),
-			command.New("docker compose up", "history", false),
+			command.NewCommand("kubectl get pods", "history", false),
+			command.NewCommand("docker compose up", "history", false),
 		}
 
 		pins := []command.Command{
-			command.New("KUBECTL GET PODS", "pin", true),
+			command.NewCommand("KUBECTL GET PODS", "pin", true),
 		}
 
 		filtered := excludePinnedCommands(historyCommands, pins)
@@ -281,8 +300,8 @@ func TestRunnerPrintPlainResults(t *testing.T) {
 		r, stdout, _ := newTestRunner(t, t.TempDir())
 
 		r.printPlainResults([]command.Command{
-			command.New("kubectl get pods", "pin", true),
-			command.New("go test ./...", "history", false),
+			command.NewCommand("kubectl get pods", "pin", true),
+			command.NewCommand("go test ./...", "history", false),
 		})
 
 		assert.Equal(t, "kubectl get pods\ngo test ./...\n", stdout.String())
@@ -298,7 +317,7 @@ func TestRunnerPrintFZFResults(t *testing.T) {
 		r, stdout, _ := newTestRunner(t, t.TempDir())
 
 		r.printFZFResults([]command.Command{
-			command.NewWithDescription("kubectl\tget\r\npods", "Show\tpods", "pin", true),
+			command.NewCommandWithDescription("kubectl\tget\r\npods", "Show\tpods", "pin", true),
 		})
 
 		assert.Equal(
@@ -315,7 +334,7 @@ func TestResultKind(t *testing.T) {
 	t.Run("returns pin for pinned command", func(t *testing.T) {
 		t.Parallel()
 
-		kind := resultKind(command.New("kubectl get pods", "pin", true))
+		kind := resultKind(command.NewCommand("kubectl get pods", "pin", true))
 
 		assert.Equal(t, "pin", kind)
 	})
@@ -323,7 +342,7 @@ func TestResultKind(t *testing.T) {
 	t.Run("returns history for non pinned command", func(t *testing.T) {
 		t.Parallel()
 
-		kind := resultKind(command.New("kubectl get pods", "history", false))
+		kind := resultKind(command.NewCommand("kubectl get pods", "history", false))
 
 		assert.Equal(t, "history", kind)
 	})
@@ -351,14 +370,6 @@ func TestEncodeFZFPayload(t *testing.T) {
 
 		assert.Equal(t, "a3ViZWN0bCBnZXQgcG9kcw==", payload)
 	})
-}
-
-func newTestCLIConfig(dataDir string) Config {
-	return Config{
-		DataDir:      dataDir,
-		HistoryLimit: 0,
-		Limit:        0,
-	}
 }
 
 func writeRunnerFile(t testing.TB, dir string, name string, content string) string {

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRemoveCmdRun(t *testing.T) {
+func TestRunRemove(t *testing.T) {
 	t.Parallel()
 
 	t.Run("requires command text", func(t *testing.T) {
@@ -18,7 +18,7 @@ func TestRemoveCmdRun(t *testing.T) {
 		home := t.TempDir()
 		r, _, _ := newTestRunner(t, home)
 
-		err := (&RemoveCmd{}).Run(r, newTestCLI(filepath.Join(home, "data")))
+		err := RunRemove(r, newTestConfig(filepath.Join(home, "data")), RemoveOptions{})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "remove requires command text")
@@ -30,7 +30,7 @@ func TestRemoveCmdRun(t *testing.T) {
 		home := t.TempDir()
 		r, _, _ := newTestRunner(t, home)
 
-		err := (&RemoveCmd{Command: []string{"--"}}).Run(r, newTestCLI(filepath.Join(home, "data")))
+		err := RunRemove(r, newTestConfig(filepath.Join(home, "data")), RemoveOptions{Command: []string{"--"}})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "remove requires non-empty command text")
@@ -43,12 +43,12 @@ func TestRemoveCmdRun(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, stdout, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show running pods"))
 
-		err := (&RemoveCmd{
+		err := RunRemove(r, newTestConfig(dataDir), RemoveOptions{
 			Command: []string{"--", "kubectl", "get", "pods"},
-		}).Run(r, newTestCLI(dataDir))
+		})
 
 		require.NoError(t, err)
 		assert.Equal(t, "kubectl get pods\n", stdout.String())

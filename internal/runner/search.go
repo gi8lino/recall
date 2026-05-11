@@ -2,7 +2,6 @@ package runner
 
 import (
 	"encoding/base64"
-	"fmt"
 	"strings"
 
 	"github.com/containeroo/recall/internal/command"
@@ -11,45 +10,26 @@ import (
 	"github.com/containeroo/recall/internal/store"
 )
 
-// SearchCmd contains options for the search command.
-type SearchCmd struct {
-	// PinsOnly limits search results to pinned commands.
-	PinsOnly bool `name:"pins-only" help:"Search pinned commands only."`
-
-	// HistoryOnly limits search results to shell history commands.
-	HistoryOnly bool `name:"history-only" help:"Search shell history commands only."`
-
-	// ExcludePins removes history commands that are already pinned.
-	ExcludePins bool `name:"exclude-pins" help:"Exclude commands from history results when they are already pinned."`
-
-	// Format controls how search results are printed.
-	Format string `name:"format" enum:"plain,fzf" default:"plain" help:"Output format."`
-
-	// Query contains the search terms used to match commands.
-	Query []string `arg:"" optional:"" name:"query" help:"Search query terms."`
+// SearchOptions configures one search invocation.
+type SearchOptions struct {
+	PinsOnly    bool     // PinsOnly limits search results to pinned commands.
+	HistoryOnly bool     // HistoryOnly limits search results to shell history commands.
+	ExcludePins bool     // ExcludePins removes history commands that are already pinned.
+	Format      string   // Format controls how search results are printed.
+	Query       []string // Query contains the search terms used to match commands.
 }
 
-// Run scans pinned commands and shell history for matching commands.
-func (c *SearchCmd) Run(r Runner, cli *CLI) error {
-	if c.PinsOnly && c.HistoryOnly {
-		return fmt.Errorf("--pins-only and --history-only cannot be used together")
-	}
-
-	if c.ExcludePins && !c.HistoryOnly {
-		return fmt.Errorf("--exclude-pins can only be used with --history-only")
-	}
-
-	cfg := cli.Config(r.home)
-
-	items, err := r.searchCommands(cfg, c.PinsOnly, c.HistoryOnly, c.ExcludePins)
+// RunSearch scans pinned commands and shell history for matching commands.
+func RunSearch(r Runner, cfg Config, opts SearchOptions) error {
+	items, err := r.searchCommands(cfg, opts.PinsOnly, opts.HistoryOnly, opts.ExcludePins)
 	if err != nil {
 		r.logger.Warnf("load commands: %v", err)
 	}
 
-	query := strings.Join(c.Query, " ")
-	results := index.New(items).Search(query, cfg.Limit)
+	query := strings.Join(opts.Query, " ")
+	results := index.NewIndex(items).Search(query, cfg.Limit)
 
-	switch c.Format {
+	switch opts.Format {
 	case "fzf":
 		r.printFZFResults(results)
 	default:
@@ -64,16 +44,18 @@ func (r Runner) searchCommands(cfg Config, pinsOnly, historyOnly, excludePins bo
 	switch {
 	case pinsOnly:
 		return r.loadPinnedCommands(cfg)
+
 	case historyOnly:
 		return r.loadHistoryCommands(cfg, excludePins)
+
 	default:
-		return r.loadCommands(cfg)
+		return r.loadCommands(cfg, excludePins)
 	}
 }
 
 // loadPinnedCommands reads pinned commands from the recall store.
 func (r Runner) loadPinnedCommands(cfg Config) ([]command.Command, error) {
-	st := store.New(r.storePath(cfg))
+	st := store.NewStore(r.storePath(cfg))
 	return st.Pins()
 }
 
@@ -95,9 +77,9 @@ func (r Runner) loadHistoryCommands(cfg Config, excludePins bool) ([]command.Com
 }
 
 // loadCommands reads pinned commands and shell history into one command list.
-func (r Runner) loadCommands(cfg Config) ([]command.Command, error) {
+func (r Runner) loadCommands(cfg Config, excludePins bool) ([]command.Command, error) {
 	pins, pinErr := r.loadPinnedCommands(cfg)
-	historyCommands, historyErr := r.loadHistoryCommands(cfg, true)
+	historyCommands, historyErr := r.loadHistoryCommands(cfg, excludePins)
 
 	items := make([]command.Command, 0, len(pins)+len(historyCommands))
 	items = append(items, pins...)
@@ -136,7 +118,7 @@ func excludePinnedCommands(historyCommands []command.Command, pins []command.Com
 
 // commandKey returns the normalized deduplication key for a command.
 func commandKey(text string) string {
-	return strings.ToLower(command.Normalize(text))
+	return strings.ToLower(strings.TrimSpace(text))
 }
 
 // printPlainResults prints one command per line.

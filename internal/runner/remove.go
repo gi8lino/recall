@@ -1,30 +1,28 @@
 package runner
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/containeroo/recall/internal/store"
 )
 
-// RemoveCmd contains options for the remove command.
-type RemoveCmd struct {
-	// Command contains the pinned command text to remove.
-	Command []string `arg:"" name:"command" passthrough:"" help:"Pinned command text to remove."`
+// RemoveOptions configures one remove invocation.
+type RemoveOptions struct {
+	Command []string // Command contains the pinned command text to remove.
 }
 
-// Run removes an existing pinned command.
-func (c *RemoveCmd) Run(r Runner, cli *CLI) error {
-	if len(c.Command) == 0 {
-		return fmt.Errorf("remove requires command text")
+// RunRemove removes an existing pinned command.
+func RunRemove(r Runner, cfg Config, opts RemoveOptions) error {
+	if len(opts.Command) == 0 {
+		return errors.New("remove requires command text")
 	}
 
-	cfg := cli.Config(r.home)
-	text := commandTextFromArgs(c.Command)
+	text := commandTextFromArgs(opts.Command)
 	if text == "" {
-		return fmt.Errorf("remove requires non-empty command text")
+		return errors.New("remove requires non-empty command text")
 	}
 
-	st := store.New(r.storePath(cfg))
+	st := store.NewStore(r.storePath(cfg))
 	if err := st.RemovePin(text); err != nil {
 		return err
 	}

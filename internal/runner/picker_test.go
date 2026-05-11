@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPickerCmdRun(t *testing.T) {
+func TestRunPicker(t *testing.T) {
 	t.Run("prints fzf picker rows", func(t *testing.T) {
 		home := t.TempDir()
 		dataDir := filepath.Join(home, "data")
@@ -24,10 +24,10 @@ func TestPickerCmdRun(t *testing.T) {
 		t.Setenv("RECALL_FZF_COMMAND_WIDTH", "20")
 		t.Setenv("RECALL_FZF_DESCRIPTION_WIDTH", "20")
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show pods"))
 
-		err := (&PickerCmd{Format: "fzf"}).Run(r, newTestCLI(dataDir))
+		err := RunPicker(r, newTestConfig(dataDir), PickerOptions{Format: "fzf"})
 
 		require.NoError(t, err)
 
@@ -69,10 +69,10 @@ func TestPickerCmdRun(t *testing.T) {
 		t.Setenv("RECALL_FZF_COMMAND_WIDTH", "20")
 		t.Setenv("RECALL_FZF_DESCRIPTION_WIDTH", "20")
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show pods"))
 
-		err := (&PickerCmd{Format: "json"}).Run(r, newTestCLI(dataDir))
+		err := RunPicker(r, newTestConfig(dataDir), PickerOptions{Format: "json"})
 
 		require.NoError(t, err)
 
@@ -104,7 +104,7 @@ func TestPickerCmdRun(t *testing.T) {
 
 		r, _, _ := newTestRunner(t, t.TempDir())
 
-		err := (&PickerCmd{Format: "yaml"}).Run(r, newTestCLI(filepath.Join(t.TempDir(), "data")))
+		err := RunPicker(r, newTestConfig(filepath.Join(t.TempDir(), "data")), PickerOptions{Format: "yaml"})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unsupported picker format "yaml"`)
@@ -125,10 +125,10 @@ func TestRunnerPickerCandidates(t *testing.T) {
 				"zsh-history\t19\tgo test ./...\x00",
 		)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show pods"))
 
-		candidates, err := r.pickerCandidates(newTestCLIConfig(dataDir), 0)
+		candidates, err := r.pickerCandidates(newTestConfig(dataDir), 0)
 
 		require.NoError(t, err)
 		require.Len(t, candidates, 2)
@@ -154,11 +154,11 @@ func TestRunnerPickerPinCandidates(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, _, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("go test ./...", "Run tests"))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show pods"))
 
-		candidates, err := r.pickerPinCandidates(newTestCLIConfig(dataDir), 1)
+		candidates, err := r.pickerPinCandidates(newTestConfig(dataDir), 1)
 
 		require.NoError(t, err)
 		require.Len(t, candidates, 1)
@@ -526,40 +526,6 @@ func TestEncodePickerPayload(t *testing.T) {
 		t.Parallel()
 
 		assert.Equal(t, "a3ViZWN0bCBnZXQgcG9kcw==", encodePickerPayload("kubectl get pods"))
-	})
-}
-
-func TestEnvString(t *testing.T) {
-	t.Run("returns environment value", func(t *testing.T) {
-		t.Setenv("RECALL_TEST_VALUE", "configured")
-
-		assert.Equal(t, "configured", envString("RECALL_TEST_VALUE", "fallback"))
-	})
-
-	t.Run("returns fallback for empty value", func(t *testing.T) {
-		t.Setenv("RECALL_TEST_VALUE", "")
-
-		assert.Equal(t, "fallback", envString("RECALL_TEST_VALUE", "fallback"))
-	})
-}
-
-func TestEnvInt(t *testing.T) {
-	t.Run("returns environment integer", func(t *testing.T) {
-		t.Setenv("RECALL_TEST_INT", "42")
-
-		assert.Equal(t, 42, envInt("RECALL_TEST_INT", 7))
-	})
-
-	t.Run("returns fallback for invalid integer", func(t *testing.T) {
-		t.Setenv("RECALL_TEST_INT", "nope")
-
-		assert.Equal(t, 7, envInt("RECALL_TEST_INT", 7))
-	})
-
-	t.Run("returns fallback for empty value", func(t *testing.T) {
-		t.Setenv("RECALL_TEST_INT", "")
-
-		assert.Equal(t, 7, envInt("RECALL_TEST_INT", 7))
 	})
 }
 

@@ -2,21 +2,18 @@ package runner
 
 import "github.com/containeroo/recall/internal/shell"
 
-// InitCmd contains options for the init command.
-type InitCmd struct {
-	// NoBind prints shell integration without binding Ctrl+R.
-	NoBind bool `name:"no-bind" help:"Print shell integration without binding Ctrl+R."`
-
-	// Shell is the shell integration to generate.
-	Shell string `arg:"" enum:"bash,zsh" help:"Shell to initialize."`
+// InitOptions configures one init invocation.
+type InitOptions struct {
+	NoBind bool   // NoBind prints shell integration without binding Ctrl+R.
+	Shell  string // Shell is the shell integration to generate.
 }
 
-// Run prints shell integration for bash or zsh.
-func (c *InitCmd) Run(r Runner) error {
+// RunInit prints shell integration for bash or zsh.
+func RunInit(r Runner, opts InitOptions) error {
 	script, err := shell.Init(shell.InitRequest{
-		Shell:  c.Shell,
+		Shell:  opts.Shell,
 		Binary: r.binary,
-		NoBind: c.NoBind,
+		NoBind: opts.NoBind,
 	})
 	if err != nil {
 		return err

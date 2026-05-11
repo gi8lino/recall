@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInitCmdRun(t *testing.T) {
+func TestRunInit(t *testing.T) {
 	t.Parallel()
 
 	t.Run("prints zsh integration", func(t *testing.T) {
@@ -15,7 +15,7 @@ func TestInitCmdRun(t *testing.T) {
 
 		r, stdout, _ := newTestRunner(t, t.TempDir())
 
-		err := (&InitCmd{Shell: "zsh"}).Run(r)
+		err := RunInit(r, InitOptions{Shell: "zsh"})
 
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "__recall_ctrl_r")
@@ -27,7 +27,7 @@ func TestInitCmdRun(t *testing.T) {
 
 		r, stdout, _ := newTestRunner(t, t.TempDir())
 
-		err := (&InitCmd{Shell: "zsh", NoBind: true}).Run(r)
+		err := RunInit(r, InitOptions{Shell: "zsh", NoBind: true})
 
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "zle -N __recall_ctrl_r")

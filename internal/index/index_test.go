@@ -8,19 +8,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNew(t *testing.T) {
+func TestNewCommand(t *testing.T) {
 	t.Parallel()
 
 	t.Run("deduplicates commands while preserving first occurrence", func(t *testing.T) {
 		t.Parallel()
 
 		items := []command.Command{
-			command.New("kubectl get pods", "pin", true),
-			command.New("go test ./...", "history", false),
-			command.New("KUBECTL GET PODS", "history", false),
+			command.NewCommand("kubectl get pods", "pin", true),
+			command.NewCommand("go test ./...", "history", false),
+			command.NewCommand("KUBECTL GET PODS", "history", false),
 		}
 
-		idx := New(items)
+		idx := NewIndex(items)
 
 		require.Len(t, idx.Items, 2)
 		assert.Equal(t, "kubectl get pods", idx.Items[0].Text)
@@ -32,12 +32,12 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 
 		items := []command.Command{
-			command.New("", "history", false),
-			command.New("   ", "history", false),
-			command.New("go test ./...", "history", false),
+			command.NewCommand("", "history", false),
+			command.NewCommand("   ", "history", false),
+			command.NewCommand("go test ./...", "history", false),
 		}
 
-		idx := New(items)
+		idx := NewIndex(items)
 
 		require.Len(t, idx.Items, 1)
 		assert.Equal(t, "go test ./...", idx.Items[0].Text)
@@ -50,9 +50,9 @@ func TestIndexSearch(t *testing.T) {
 	t.Run("returns all commands when query is empty", func(t *testing.T) {
 		t.Parallel()
 
-		idx := New([]command.Command{
-			command.New("kubectl get pods", "pin", true),
-			command.New("go test ./...", "history", false),
+		idx := NewIndex([]command.Command{
+			command.NewCommand("kubectl get pods", "pin", true),
+			command.NewCommand("go test ./...", "history", false),
 		})
 
 		results := idx.Search("", 0)
@@ -65,10 +65,10 @@ func TestIndexSearch(t *testing.T) {
 	t.Run("filters commands by query while preserving order", func(t *testing.T) {
 		t.Parallel()
 
-		idx := New([]command.Command{
-			command.New("kubectl get pods", "pin", true),
-			command.New("docker compose up", "history", false),
-			command.New("kubectl describe pod nginx", "history", false),
+		idx := NewIndex([]command.Command{
+			command.NewCommand("kubectl get pods", "pin", true),
+			command.NewCommand("docker compose up", "history", false),
+			command.NewCommand("kubectl describe pod nginx", "history", false),
 		})
 
 		results := idx.Search("kubectl", 0)
@@ -81,9 +81,9 @@ func TestIndexSearch(t *testing.T) {
 	t.Run("matches descriptions", func(t *testing.T) {
 		t.Parallel()
 
-		idx := New([]command.Command{
-			command.NewWithDescription("kubectl get pods", "Show running pods", "pin", true),
-			command.New("docker compose up", "history", false),
+		idx := NewIndex([]command.Command{
+			command.NewCommandWithDescription("kubectl get pods", "Show running pods", "pin", true),
+			command.NewCommand("docker compose up", "history", false),
 		})
 
 		results := idx.Search("running", 0)
@@ -95,10 +95,10 @@ func TestIndexSearch(t *testing.T) {
 	t.Run("requires all query terms to match", func(t *testing.T) {
 		t.Parallel()
 
-		idx := New([]command.Command{
-			command.NewWithDescription("kubectl get pods", "Show running pods", "pin", true),
-			command.New("kubectl get services", "history", false),
-			command.New("docker compose up", "history", false),
+		idx := NewIndex([]command.Command{
+			command.NewCommandWithDescription("kubectl get pods", "Show running pods", "pin", true),
+			command.NewCommand("kubectl get services", "history", false),
+			command.NewCommand("docker compose up", "history", false),
 		})
 
 		results := idx.Search("kubectl pods", 0)
@@ -110,10 +110,10 @@ func TestIndexSearch(t *testing.T) {
 	t.Run("applies positive limit", func(t *testing.T) {
 		t.Parallel()
 
-		idx := New([]command.Command{
-			command.New("echo one", "history", false),
-			command.New("echo two", "history", false),
-			command.New("echo three", "history", false),
+		idx := NewIndex([]command.Command{
+			command.NewCommand("echo one", "history", false),
+			command.NewCommand("echo two", "history", false),
+			command.NewCommand("echo three", "history", false),
 		})
 
 		results := idx.Search("echo", 2)
@@ -126,10 +126,10 @@ func TestIndexSearch(t *testing.T) {
 	t.Run("treats zero limit as unlimited", func(t *testing.T) {
 		t.Parallel()
 
-		idx := New([]command.Command{
-			command.New("echo one", "history", false),
-			command.New("echo two", "history", false),
-			command.New("echo three", "history", false),
+		idx := NewIndex([]command.Command{
+			command.NewCommand("echo one", "history", false),
+			command.NewCommand("echo two", "history", false),
+			command.NewCommand("echo three", "history", false),
 		})
 
 		results := idx.Search("echo", 0)
@@ -145,14 +145,14 @@ func TestIndexSearch(t *testing.T) {
 
 		items := make([]command.Command, 0, 25)
 		for i := 0; i < 25; i++ {
-			items = append(items, command.New("echo item", "history", false))
+			items = append(items, command.NewCommand("echo item", "history", false))
 		}
 
 		for i := range items {
 			items[i].Text = items[i].Text + string(rune('a'+i))
 		}
 
-		idx := New(items)
+		idx := NewIndex(items)
 		results := idx.Search("echo", -1)
 
 		require.Len(t, results, 20)
@@ -163,8 +163,8 @@ func TestIndexSearch(t *testing.T) {
 
 		idx := Index{
 			Items: []command.Command{
-				command.New("", "history", false),
-				command.New("go test ./...", "history", false),
+				command.NewCommand("", "history", false),
+				command.NewCommand("go test ./...", "history", false),
 			},
 		}
 
@@ -182,8 +182,8 @@ func TestDedupe(t *testing.T) {
 		t.Parallel()
 
 		items := []command.Command{
-			command.NewWithDescription("kubectl get pods", "Pinned pods", "pin", true),
-			command.NewWithDescription("kubectl get pods", "History pods", "history", false),
+			command.NewCommandWithDescription("kubectl get pods", "Pinned pods", "pin", true),
+			command.NewCommandWithDescription("kubectl get pods", "History pods", "history", false),
 		}
 
 		results := dedupe(items)
@@ -198,8 +198,8 @@ func TestDedupe(t *testing.T) {
 		t.Parallel()
 
 		items := []command.Command{
-			command.New("KUBECTL GET PODS", "pin", true),
-			command.New("kubectl get pods", "history", false),
+			command.NewCommand("KUBECTL GET PODS", "pin", true),
+			command.NewCommand("kubectl get pods", "history", false),
 		}
 
 		results := dedupe(items)
@@ -226,9 +226,9 @@ func TestDedupe(t *testing.T) {
 		t.Parallel()
 
 		items := []command.Command{
-			command.New("", "history", false),
-			command.New("   ", "history", false),
-			command.New("go test ./...", "history", false),
+			command.NewCommand("", "history", false),
+			command.NewCommand("   ", "history", false),
+			command.NewCommand("go test ./...", "history", false),
 		}
 
 		results := dedupe(items)

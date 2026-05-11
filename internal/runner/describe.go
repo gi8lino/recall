@@ -1,39 +1,35 @@
 package runner
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/containeroo/recall/internal/store"
 )
 
-// DescribeCmd contains options for the describe command.
-type DescribeCmd struct {
-	// Description explains why the pinned command is useful.
-	Description string `short:"d" name:"description" help:"Description for the pinned command."`
-
-	// Command contains the pinned command text to update.
-	Command []string `arg:"" name:"command" passthrough:"" help:"Pinned command text to describe."`
+// DescribeOptions configures one describe invocation.
+type DescribeOptions struct {
+	Description string   // Description explains why the pinned command is useful.
+	Command     []string // Command contains the pinned command text to update.
 }
 
-// Run updates the description of an existing pinned command.
-func (c *DescribeCmd) Run(r Runner, cli *CLI) error {
-	if strings.TrimSpace(c.Description) == "" {
-		return fmt.Errorf("describe requires a non-empty description")
+// RunDescribe updates the description of an existing pinned command.
+func RunDescribe(r Runner, cfg Config, opts DescribeOptions) error {
+	if strings.TrimSpace(opts.Description) == "" {
+		return errors.New("describe requires a non-empty description")
 	}
 
-	if len(c.Command) == 0 {
-		return fmt.Errorf("describe requires command text")
+	if len(opts.Command) == 0 {
+		return errors.New("describe requires command text")
 	}
 
-	cfg := cli.Config(r.home)
-	text := commandTextFromArgs(c.Command)
+	text := commandTextFromArgs(opts.Command)
 	if text == "" {
-		return fmt.Errorf("describe requires non-empty command text")
+		return errors.New("describe requires non-empty command text")
 	}
 
-	st := store.New(r.storePath(cfg))
-	if err := st.DescribePin(text, c.Description); err != nil {
+	st := store.NewStore(r.storePath(cfg))
+	if err := st.DescribePin(text, opts.Description); err != nil {
 		return err
 	}
 

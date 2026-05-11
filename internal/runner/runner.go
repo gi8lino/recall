@@ -1,33 +1,21 @@
 package runner
 
 import (
-	"errors"
 	"io"
 	"os"
+	"path/filepath"
 
-	"github.com/alecthomas/kong"
-
+	"github.com/containeroo/recall/internal/history"
 	"github.com/containeroo/recall/internal/logger"
 )
 
-const version = "dev"
-
 // Runner holds process dependencies used by the application layer.
 type Runner struct {
-	// input reads command input for interactive commands.
-	input io.Reader
-
-	// output writes normal command output.
-	output logger.Logger
-
-	// logger writes warnings, informational messages, and debug messages.
-	logger logger.Logger
-
-	// home is the current user's home directory.
-	home string
-
-	// binary is the executable path used in generated shell snippets.
-	binary string
+	input  io.Reader     // input reads command input for interactive commands.
+	output logger.Logger // output writes normal command output.
+	logger logger.Logger // logger writes warnings, informational messages, and debug messages.
+	home   string        // home is the current user's home directory.
+	binary string        // binary is the executable path used in generated shell snippets.
 }
 
 // NewRunner creates a runner with the given process dependencies.
@@ -41,41 +29,31 @@ func NewRunner(stdout, stderr io.Writer, home, binary string) Runner {
 	}
 }
 
-// Run parses CLI arguments and executes the selected recall command.
-func (r Runner) Run(args []string) error {
-	var cli CLI
-
-	parser, err := kong.New(
-		&cli,
-		kong.Name("recall"),
-		kong.Description("A terminal command palette powered by shell history and pinned commands."),
-		kong.Vars{
-			"version": version,
-		},
-		kong.Writers(r.output.Writer(), r.logger.Writer()),
-	)
-	if err != nil {
-		return err
-	}
-
-	ctx, err := parser.Parse(args)
-	if err != nil {
-		return r.parseError(err)
-	}
-
+// SetLogging updates verbose/debug logger behavior for future command execution.
+func (r *Runner) SetLogging(verbose bool, debug bool) {
 	r.logger = r.logger.
-		WithVerbose(cli.Verbose).
-		WithDebug(cli.Debug)
-
-	return ctx.Run(r, &cli)
+		WithVerbose(verbose).
+		WithDebug(debug)
 }
 
-// parseError prints generated Kong usage for parse errors and returns the original error.
-func (r Runner) parseError(err error) error {
-	var parseErr *kong.ParseError
-	if errors.As(err, &parseErr) && parseErr.Context != nil {
-		_ = parseErr.Context.PrintUsage(true)
+// historySources returns either custom history files or default bash/zsh sources.
+func (r Runner) historySources(cfg Config) []history.Source {
+	if len(cfg.HistoryFiles) == 0 {
+		return history.DefaultSources(r.home)
 	}
 
-	return err
+	sources := make([]history.Source, 0, len(cfg.HistoryFiles))
+	for _, file := range cfg.HistoryFiles {
+		sources = append(sources, history.Source{
+			Path:  expandHome(file, r.home),
+			Shell: "custom",
+		})
+	}
+
+	return sources
+}
+
+// storePath returns the JSON store path inside the configured data directory.
+func (r Runner) storePath(cfg Config) string {
+	return filepath.Join(cfg.DataDir, "store.json")
 }

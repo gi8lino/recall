@@ -1,34 +1,30 @@
 package runner
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/containeroo/recall/internal/store"
 )
 
-// PinCmd contains options for the pin command.
-type PinCmd struct {
-	// Description explains why the command is useful.
-	Description string `short:"d" name:"description" help:"Optional description for the pinned command."`
-
-	// Command contains the command text to pin.
-	Command []string `arg:"" name:"command" passthrough:"" help:"Command text to pin."`
+// PinOptions configures one pin invocation.
+type PinOptions struct {
+	Description string   // Description explains why the command is useful.
+	Command     []string // Command contains the command text to pin.
 }
 
-// Run stores a command in recall's own pinned-command store.
-func (c *PinCmd) Run(r Runner, cli *CLI) error {
-	if len(c.Command) == 0 {
-		return fmt.Errorf("pin requires command text")
+// RunPin stores a command in recall's own pinned-command store.
+func RunPin(r Runner, cfg Config, opts PinOptions) error {
+	if len(opts.Command) == 0 {
+		return errors.New("pin requires command text")
 	}
 
-	cfg := cli.Config(r.home)
-	text := commandTextFromArgs(c.Command)
+	text := commandTextFromArgs(opts.Command)
 	if text == "" {
-		return fmt.Errorf("pin requires non-empty command text")
+		return errors.New("pin requires non-empty command text")
 	}
 
-	st := store.New(r.storePath(cfg))
-	if err := st.AddPin(text, c.Description); err != nil {
+	st := store.NewStore(r.storePath(cfg))
+	if err := st.AddPin(text, opts.Description); err != nil {
 		return err
 	}
 

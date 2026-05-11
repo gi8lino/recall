@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPinCmdRun(t *testing.T) {
+func TestRunPin(t *testing.T) {
 	t.Parallel()
 
 	t.Run("requires command text", func(t *testing.T) {
@@ -18,7 +18,7 @@ func TestPinCmdRun(t *testing.T) {
 		home := t.TempDir()
 		r, _, _ := newTestRunner(t, home)
 
-		err := (&PinCmd{}).Run(r, newTestCLI(filepath.Join(home, "data")))
+		err := RunPin(r, newTestConfig(filepath.Join(home, "data")), PinOptions{})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "pin requires command text")
@@ -30,7 +30,7 @@ func TestPinCmdRun(t *testing.T) {
 		home := t.TempDir()
 		r, _, _ := newTestRunner(t, home)
 
-		err := (&PinCmd{Command: []string{"--"}}).Run(r, newTestCLI(filepath.Join(home, "data")))
+		err := RunPin(r, newTestConfig(filepath.Join(home, "data")), PinOptions{Command: []string{"--"}})
 
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "pin requires non-empty command text")
@@ -43,15 +43,15 @@ func TestPinCmdRun(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, stdout, _ := newTestRunner(t, home)
 
-		err := (&PinCmd{
+		err := RunPin(r, newTestConfig(dataDir), PinOptions{
 			Description: "Show running pods",
 			Command:     []string{"--", "kubectl", "get", "pods"},
-		}).Run(r, newTestCLI(dataDir))
+		})
 
 		require.NoError(t, err)
 		assert.Equal(t, "kubectl get pods\n", stdout.String())
 
-		pins, err := store.New(filepath.Join(dataDir, "store.json")).Pins()
+		pins, err := store.NewStore(filepath.Join(dataDir, "store.json")).Pins()
 		require.NoError(t, err)
 		require.Len(t, pins, 1)
 		assert.Equal(t, "kubectl get pods", pins[0].Text)

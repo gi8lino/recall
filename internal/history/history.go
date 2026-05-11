@@ -14,20 +14,14 @@ import (
 
 // Source describes one shell history file to scan.
 type Source struct {
-	// Path is the absolute path to the history file.
-	Path string
-
-	// Shell identifies the shell format expected in the file.
-	Shell string
+	Path  string // Path is the absolute path to the history file.
+	Shell string // Shell identifies the shell format expected in the file.
 }
 
 // Reader reads commands from one or more shell history files.
 type Reader struct {
-	// Sources contains the ordered list of history files to scan.
-	Sources []Source
-
-	// MaxLines limits how many recent lines are read from each history file.
-	MaxLines int
+	Sources  []Source // Sources contains the ordered list of history files to scan.
+	MaxLines int      // MaxLines limits how many recent lines are read from each history file.
 }
 
 // DefaultSources returns the default shell history files.
@@ -98,7 +92,7 @@ func readSource(source Source, maxLines int) ([]command.Command, error) {
 
 	commands := make([]command.Command, 0, len(lines))
 	for i := len(lines) - 1; i >= 0; i-- {
-		commands = append(commands, command.New(lines[i], source.Shell, false))
+		commands = append(commands, command.NewCommand(lines[i], source.Shell, false))
 	}
 
 	return commands, nil
@@ -248,7 +242,7 @@ func parseZshHistoryLines(rawLines []string) []string {
 			return
 		}
 
-		text := command.Normalize(current.String())
+		text := strings.TrimSpace(current.String())
 		if text != "" {
 			lines = append(lines, text)
 		}

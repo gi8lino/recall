@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestListCmdRun(t *testing.T) {
+func TestRunList(t *testing.T) {
 	t.Parallel()
 
 	t.Run("prints no output when there are no pins", func(t *testing.T) {
@@ -19,7 +19,7 @@ func TestListCmdRun(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, stdout, _ := newTestRunner(t, home)
 
-		err := (&ListCmd{}).Run(r, newTestCLI(dataDir))
+		err := RunList(r, newTestConfig(dataDir))
 
 		require.NoError(t, err)
 		assert.Empty(t, stdout.String())
@@ -32,11 +32,11 @@ func TestListCmdRun(t *testing.T) {
 		dataDir := filepath.Join(home, "data")
 		r, stdout, _ := newTestRunner(t, home)
 
-		st := store.New(filepath.Join(dataDir, "store.json"))
+		st := store.NewStore(filepath.Join(dataDir, "store.json"))
 		require.NoError(t, st.AddPin("go test ./...", ""))
 		require.NoError(t, st.AddPin("kubectl get pods", "Show running pods"))
 
-		err := (&ListCmd{}).Run(r, newTestCLI(dataDir))
+		err := RunList(r, newTestConfig(dataDir))
 
 		require.NoError(t, err)
 		assert.Equal(t, "Show running pods\tkubectl get pods\ngo test ./...\n", stdout.String())
